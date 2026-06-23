@@ -79,66 +79,75 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
     prs.save(output_path)
     return output_path
 
-# --- 📱 现场巡场助理 (团队全员名单内置版) ---
+# --- 📱 现场巡场助理 (完美输入版) ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
-st.title("📱 现场巡场助理 (团队全员版)")
+st.title("📱 现场巡场助理 (多页稳定版)")
 
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
+
+# 全局常用备选人员名单
+team_members = ["樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "刘璐", "吕山", "王凤国", "夏友强"]
 
 # --- 1. 公共信息区域 ---
 st.subheader("🏢 第一步：填写项目公共信息")
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 
-# 🌟 核心优化：11位团队主力大将名单内置（默认首选樊洋洋）
-user_options = ["樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "刘璐", "吕山", "王凤国", "夏友强", "✍️ 手动输入..."]
-selected_user = st.selectbox("检查人", options=user_options, index=0)
-
-if selected_user == "✍️ 手动输入...":
-    user = st.text_input("请输入实际检查人姓名", value="", placeholder="例：张三")
-else:
-    user = selected_user
+# 🌟 修复方案：直接用 text_input 接收最终名字，同时提供快捷联想按钮
+st.write("✍️ **检查人** (可在下方直接输入任意新名字，或点击快捷键填入)")
+user = st.text_input("当前检查人姓名", value="樊洋洋", label_visibility="collapsed")
+# 快捷小标签按钮，点一下就能把名字飞进输入框
+user_cols = st.columns(6)
+for idx, member in enumerate(team_members[:12]):
+    with user_cols[idx % 6]:
+        if st.button(member, key=f"user_btn_{member}"):
+            user = member
+            st.rerun()
 
 check_date = st.date_input("检查时间")
 date_str = check_date.strftime("%Y/%m/%d")
 
 st.divider()
 
-# --- 2. 问题录入区域（支持循环添加） ---
+# --- 2. 问题录入区域 ---
 st.subheader(f"📷 第二步：录入巡场问题 (当前已录入 {len(st.session_state.problem_list)} 个问题)")
 
 uploaded_file = st.file_uploader("📷 拍摄/上传当前问题照片", type=["jpg", "jpeg", "png"], key=f"file_{len(st.session_state.problem_list)}")
 desc = st.text_area("问题描述", value="", placeholder="请录入现场问题描述（支持手机语音转文字）...", key=f"desc_{len(st.session_state.problem_list)}")
 solve = st.text_area("解决措施", value="", placeholder="请录入整改要求与措施...", key=f"solve_{len(st.session_state.problem_list)}")
 
-# 🌟 责任人同样共享这套全员名单（默认首选刘璐，方便你们配合）
-duty_options = ["刘璐", "樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "吕山", "王凤国", "夏友强", "✍️ 手动输入..."]
-selected_duty = st.selectbox("责任人", options=duty_options, index=0, key=f"duty_opt_{len(st.session_state.problem_list)}")
+# 🌟 修复方案：责任人同样改为“可输可点”模式，完美支持名单外的任何人或总包单位
+st.write("✍️ **责任人** (直接在下方输入任意新名字/单位，或点击快捷键填入)")
+current_prob_idx = len(st.session_state.problem_list)
+duty = st.text_input("当前责任人姓名/单位", value="刘璐", key=f"duty_raw_{current_prob_idx}", label_visibility="collapsed")
 
-if selected_duty == "✍️ 手动输入...":
-    duty = st.text_input("请输入实际责任人姓名", value="", placeholder="例：某某总包单位/王五", key=f"duty_name_{len(st.session_state.problem_list)}")
-else:
-    duty = selected_duty
+duty_cols = st.columns(6)
+for idx, member in enumerate(team_members):
+    with duty_cols[idx % 6]:
+        if st.button(member, key=f"duty_btn_{member}_{current_prob_idx}"):
+            st.session_state[f"duty_raw_{current_prob_idx}"] = member
+            st.rerun()
 
-decision_choice = st.radio("整改决定", options=["整改", "不整改"], index=0, horizontal=True, key=f"decision_{len(st.session_state.problem_list)}")
-if decision_choice == "整改":
-    decision_text = "整改  √ \n 不整改 ▢"
-else:
-    decision_text = "整改  ▢ \n 不整改 √"
+decision_choice = st.radio("整改决定", options=["整改", "不整改"], index=0, horizontal=True, key=f"decision_{current_prob_idx}")
+decision_text = "整改  √ \n 不整改 ▢" if decision_choice == "整改" else "整改  ▢ \n 不整改 √"
 
-deadline_date = st.date_input("要求完成时间", key=f"deadline_{len(st.session_state.problem_list)}")
+deadline_date = st.date_input("要求完成时间", key=f"deadline_{current_prob_idx}")
 deadline_str = deadline_date.strftime("%Y/%m/%d")
 
 # 暂存按钮
 if st.button("➕ 确认并添加此条问题到列表"):
-    if not duty or not user:
+    # 从session_state里获取最新打字输入的值，防止丢失
+    final_user = user
+    final_duty = st.session_state.get(f"duty_raw_{current_prob_idx}", duty)
+    
+    if not final_duty or not final_user:
         st.error("⚠️ 请确保检查人和责任人的姓名已填写完整！")
     else:
         prob_data = {
             "img_bytes": uploaded_file.getbuffer() if uploaded_file is not None else None,
             "desc": desc,
             "solve": solve,
-            "duty": duty,
+            "duty": final_duty,
             "decision": decision_text,
             "deadline": deadline_str
         }
