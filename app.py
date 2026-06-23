@@ -23,7 +23,7 @@ def safe_replace_text(text_frame, key, value):
                     if orig_font_color:
                         run.font.color.rgb = orig_font_color
 
-# --- 核心：深度克幻灯片的底层函数 ---
+# --- 核心：深度克隆幻灯片的底层函数 ---
 def duplicate_slide(prs, source_slide):
     slide_layout = source_slide.slide_layout
     new_slide = prs.slides.add_slide(slide_layout)
@@ -79,26 +79,25 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
     prs.save(output_path)
     return output_path
 
-# --- 📱 现场巡场助理 (下拉菜单自由输入版) ---
+# --- 📱 现场巡场助理 (下拉自适应极简版) ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
-st.title("📱 现场巡场助理 (下拉菜单输入版)")
+st.title("📱 现场巡场助理 (多页稳定版)")
 
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
 
-# 全局常用备选人员名单
-team_members = ["樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "刘璐", "吕山", "王凤国", "夏友强"]
+# 固定备选人员名单
+team_members = ["樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "刘璐", "吕山", "王凤国", "夏友强", "✍️ 手动输入..."]
 
 # --- 1. 公共信息区域 ---
 st.subheader("🏢 第一步：填写项目公共信息")
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 
-# 🌟 优化方案：将团队人员放入下拉菜单，支持搜索，也可以直接输入新名字
-st.write("✍️ **检查人** (点击下方下拉选择，或直接输入新名字)")
-user = st.selectbox("当前检查人姓名", options=team_members, value="樊洋洋", label_visibility="collapsed")
-# 如果用户输入了不存在于下拉列表中的名字，需要获取输入的值
-if user not in team_members:
-    user = st.text_input("当前检查人姓名", value="", key="user_new_input")
+selected_user = st.selectbox("检查人", options=team_members, index=0)
+if selected_user == "✍️ 手动输入...":
+    user = st.text_input("✍️ 请输入实际检查人姓名", value="", placeholder="例如：新同事名字")
+else:
+    user = selected_user
 
 check_date = st.date_input("检查时间")
 date_str = check_date.strftime("%Y/%m/%d")
@@ -106,19 +105,19 @@ date_str = check_date.strftime("%Y/%m/%d")
 st.divider()
 
 # --- 2. 问题录入区域 ---
-st.subheader(f"📷 第二步：录入巡场问题 (当前已录入 {len(st.session_state.problem_list)} 个问题)")
-
-uploaded_file = st.file_uploader("📷 拍摄/上传当前问题照片", type=["jpg", "jpeg", "png"], key=f"file_{len(st.session_state.problem_list)}")
-desc = st.text_area("问题描述", value="", placeholder="请录入现场问题描述（支持手机语音转文字）...", key=f"desc_{len(st.session_state.problem_list)}")
-solve = st.text_area("解决措施", value="", placeholder="请录入整改要求与措施...", key=f"solve_{len(st.session_state.problem_list)}")
-
-# 🌟 优化方案：责任人也改为下拉菜单选择
-st.write("✍️ **责任人** (点击下方下拉选择，或直接输入新名字/单位)")
 current_prob_idx = len(st.session_state.problem_list)
-duty = st.selectbox("当前责任人姓名/单位", options=team_members, value="刘璐", key=f"duty_opt_{current_prob_idx}", label_visibility="collapsed")
-# 如果输入的值不在备选项中，则获取输入的新名字
-if duty not in team_members:
-    duty = st.text_input("当前责任人姓名/单位", value="", key=f"duty_new_input_{current_prob_idx}")
+st.subheader(f"📷 第二步：录入巡场问题 (当前已录入 {current_prob_idx} 个问题)")
+
+uploaded_file = st.file_uploader("📷 拍摄/上传当前问题照片", type=["jpg", "jpeg", "png"], key=f"file_{current_prob_idx}")
+desc = st.text_area("问题描述", value="", placeholder="请录入现场问题描述（支持手机语音转文字）...", key=f"desc_{current_prob_idx}")
+solve = st.text_area("解决措施", value="", placeholder="请录入整改要求与措施...", key=f"solve_{current_prob_idx}")
+
+# 责任人下拉菜单，默认第 7 位（刘璐）
+selected_duty = st.selectbox("责任人", options=team_members, index=7, key=f"duty_select_{current_prob_idx}")
+if selected_duty == "✍️ 手动输入...":
+    duty = st.text_input("✍️ 请输入实际责任人/总包单位", value="", placeholder="例如：某某中建总包/李四", key=f"duty_input_{current_prob_idx}")
+else:
+    duty = selected_duty
 
 decision_choice = st.radio("整改决定", options=["整改", "不整改"], index=0, horizontal=True, key=f"decision_{current_prob_idx}")
 decision_text = "整改  √ \n 不整改 ▢" if decision_choice == "整改" else "整改  ▢ \n 不整改 √"
@@ -128,58 +127,5 @@ deadline_str = deadline_date.strftime("%Y/%m/%d")
 
 # 暂存按钮
 if st.button("➕ 确认并添加此条问题到列表"):
-    # 获取下拉框或输入框的最新值
-    final_user = user
-    # 重新检查并获取正确的值
-    final_duty = duty
-    # 检查责任人是否为新输入，若是新输入需特殊处理以确保获取正确文本
-    if final_duty == None:
-        final_duty = st.session_state.get(f"duty_new_input_{current_prob_idx}")
-
-    if not final_duty or not final_user:
+    if not duty or not user:
         st.error("⚠️ 请确保检查人和责任人的姓名已填写完整！")
-    else:
-        prob_data = {
-            "img_bytes": uploaded_file.getbuffer() if uploaded_file is not None else None,
-            "desc": desc,
-            "solve": solve,
-            "duty": final_duty,
-            "decision": decision_text,
-            "deadline": deadline_str
-        }
-        st.session_state.problem_list.append(prob_data)
-        st.success(f"🎉 成功！第 {len(st.session_state.problem_list)} 个问题已成功装箱！")
-        st.rerun()
-
-st.divider()
-
-# --- 3. 汇总与清空区域 ---
-st.subheader("🚀 第三步：一键打包汇总并下载")
-
-if len(st.session_state.problem_list) > 0:
-    st.write("📋 当前暂存箱内的问题列表：")
-    for i, p in enumerate(st.session_state.problem_list):
-        st.info(f"问题 {i+1}: {p['desc'][:20]}... (责任人: {p['duty']})")
-        
-    if st.button("🚀 一键打包生成完整多页 PPT 报告"):
-        if not os.path.exists("template.pptx"):
-            st.error("❌ 错误：请确保云端有名为 template.pptx 的模板文件！")
-        else:
-            with st.spinner("正在将所有问题进行多页批量排版中..."):
-                out_file = build_multi_page_ppt(project_title, user, date_str, st.session_state.problem_list)
-                if out_file:
-                    st.success("🎉 完美！多页汇总 PPT 已成功合体！")
-                    with open(out_file, "rb") as file:
-                        st.download_button(
-                            label="📥 立即点击下载多页汇总 PPT 到手机",
-                            data=file,
-                            file_name=f"{project_title}-汇总巡场报告.pptx",
-                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                        )
-                        
-    if st.button("🗑️ 清空暂存箱（重新开始）", type="secondary"):
-        st.session_state.problem_list = []
-        st.success("暂存箱已清空。")
-        st.rerun()
-else:
-    st.warning("⚠️ 暂存箱目前是空的，请至少在上方添加一个问题后再生成 PPT。")
