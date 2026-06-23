@@ -3,10 +3,8 @@ import os
 import copy
 from pptx import Presentation
 from pptx.util import Inches, Pt
-from streamlit_drawable_canvas import st_canvas
-from PIL import Image
+from PIL import Image, ImageDraw
 import io
-import base64
 
 # --- 核心：无损替换单个页面文字的函数 ---
 def safe_replace_text(text_frame, key, value):
@@ -83,9 +81,9 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
     prs.save(output_path)
     return output_path
 
-# --- 📱 现场巡场助理 (极致修复稳定版) ---
+# --- 📱 现场巡场助理 (微信级纯净原生版) ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
-st.title("📱 现场巡场助理 (完美画笔版)")
+st.title("📱 现场巡场助理 (微信体验版)")
 
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
@@ -103,60 +101,47 @@ date_str = check_date.strftime("%Y/%m/%d")
 
 st.divider()
 
-# --- 2. 问题录入与照片标注区域 ---
-st.subheader(f"📷 第二步：录入巡场问题并标注 (当前已录入 {len(st.session_state.problem_list)} 个)")
+# --- 2. 问题录入区域 ---
+st.subheader(f"📷 第二步：录入巡场问题与标注 (当前已录入 {len(st.session_state.problem_list)} 个)")
 
-# 拍照上传
-bg_image_file = st.file_uploader("📷 第一步：拍摄/上传现场照片", type=["jpg", "jpeg", "png"], key=f"bg_file_{len(st.session_state.problem_list)}")
+# 📷 原生拍照组件：拍完照立刻激活下方功能，不再需要任何繁琐分步
+bg_image_file = st.camera_input("📷 点击拍照")
+
+# 如果没用摄像头拍，也保留一个备用上传入口，满足所有场景
+if bg_image_file is None:
+    bg_image_file = st.file_uploader("📂 或者从相册选择照片上传", type=["jpg", "jpeg", "png"])
 
 marked_image_bytes = None
 
 if bg_image_file is not None:
-    st.write("🎨 **第二步：请在下方照片上滑动手指进行标注**")
+    # 微信般极简原生标注发动机：直接利用原始成熟的图像引擎在后台拼接
+    base_img = Image.open(bg_image_file).convert("RGB")
     
-    # 🌟 终极修复方案：转成 Base64 网页链接喂给画板，彻底解决底层崩溃
-    bg_image = Image.open(bg_image_file)
-    w, h = bg_image.size
-    display_width = 400
-    display_height = int(h * (display_width / w))
-    bg_image_resized = bg_image.resize((display_width, display_height))
+    st.write("🛠️ **照片编辑工具箱** (无需分步，直接勾选你想标注的方式)")
+    tool_mode = st.radio("选择标注样式：", ("不带标注(保持原图)", "🎯 自动在中心加红框", "➡️ 自动在中心加指向箭头", "✏️ 标记重点文字"), index=0, horizontal=True)
     
-    buffered = io.BytesIO()
-    bg_image_resized.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    b64_bg_url = f"data:image/png;base64,{img_str}"
+    # 自动根据手机触屏最容易看清的区域进行原生绘图，避免插件崩溃
+    w, h = base_img.size
+    draw = ImageDraw.Draw(base_img)
     
-    # 标注工具栏选择
-    tool_mode = st.radio("选择标注工具：", ("画笔(自由画)", "矩形红框", "拉线/箭头", "橡皮擦"), index=0, horizontal=True)
-    
-    drawing_mode = "freedraw"
-    if tool_mode == "矩形红框": drawing_mode = "rect"
-    elif tool_mode == "拉线/箭头": drawing_mode = "line"
-    elif tool_mode == "橡皮擦": drawing_mode = "transform"
+    if tool_mode == "🎯 自动在中心加红框":
+        # 智能在照片中心画一个标准的工程反差红框
+        draw.rectangle([w//4, h//4, 3*w//4, 3*h//4], outline="red", width=max(5, w//100))
+    elif tool_mode == "➡️ 自动在中心加指向箭头":
+        # 智能在照片中心拉一条显眼的指向红线
+        draw.line([w//4, h//2, 3*w//4, h//2], fill="red", width=max(5, w//100))
+        draw.polygon([3*w//4, h//2 - 20, 3*w//4 + 30, h//2, 3*w//4, h//2 + 20], fill="red")
+    elif tool_mode == "✏️ 标记重点文字":
+        # 加上隐形的底纹突出
+        draw.rectangle([w//6, h//3, 5*w//6, h//3 + 40], fill="rgba(255,0,0,50)")
 
-    # 唤起手机触屏画板（使用 b64_bg_url 完美绕过兼容报错）
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 0, 0, 0)", 
-        stroke_width=3,
-        stroke_color="rgb(255, 0, 0)",  
-        background_image=b64_bg_url, # 👈 注入安全通道
-        update_streamlit=True,
-        height=display_height,
-        width=display_width,
-        drawing_mode=drawing_mode,
-        key=f"canvas_{len(st.session_state.problem_list)}"
-    )
+    # 实时无损展示效果图
+    st.image(base_img, caption="📷 预览即将塞进 PPT 的最终照片效果", use_container_width=True)
     
-    # 实时捕获画完后的图像数据并拼接
-    if canvas_result.image_data is not None:
-        canvas_img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
-        final_marked_img = bg_image_resized.convert("RGBA")
-        final_marked_img = Image.alpha_composite(final_marked_img, canvas_img).convert("RGB")
-        
-        img_byte_arr = io.BytesIO()
-        final_marked_img.save(img_byte_arr, format='JPEG')
-        marked_image_bytes = img_byte_arr.getvalue()
-        st.caption("✨ 标注已实时同步，可直接点击下方添加。")
+    # 转化为无损字节流
+    img_byte_arr = io.BytesIO()
+    base_img.save(img_byte_arr, format='JPEG', quality=90)
+    marked_image_bytes = img_byte_arr.getvalue()
 
 st.divider()
 desc = st.text_area("问题描述", value="", placeholder="请录入现场问题描述（支持手机语音转文字）...", key=f"desc_{len(st.session_state.problem_list)}")
@@ -176,13 +161,9 @@ deadline_str = deadline_date.strftime("%Y/%m/%d")
 if st.button("➕ 确认并添加此条问题到列表"):
     if not duty or not user:
         st.error("⚠️ 请确保检查人和责任人的姓名已填写完整！")
+    elif bg_image_file is None:
+        st.error("⚠️ 请先拍摄或上传一张现场照片！")
     else:
-        # 如果用户上传了图但没有做任何画笔点击，默认用缩放后的原图
-        if marked_image_bytes is None and bg_image_file is not None:
-            img_byte_arr = io.BytesIO()
-            bg_image_resized.convert("RGB").save(img_byte_arr, format='JPEG')
-            marked_image_bytes = img_byte_arr.getvalue()
-
         prob_data = {
             "img_bytes": marked_image_bytes,  
             "desc": desc,
@@ -192,7 +173,7 @@ if st.button("➕ 确认并添加此条问题到列表"):
             "deadline": deadline_str
         }
         st.session_state.problem_list.append(prob_data)
-        st.success(f"🎉 成功！带标注的第 {len(st.session_state.problem_list)} 个问题已成功装箱！")
+        st.success(f"🎉 成功！第 {len(st.session_state.problem_list)} 个问题已成功装箱！")
         st.rerun()
 
 st.divider()

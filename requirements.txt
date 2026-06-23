@@ -1,3 +1,2 @@
 streamlit
 python-pptx
-streamlit-drawable-canvas
