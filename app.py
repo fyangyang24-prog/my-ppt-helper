@@ -23,18 +23,14 @@ def safe_replace_text(text_frame, key, value):
                     if orig_font_color:
                         run.font.color.rgb = orig_font_color
 
-# --- 核心：深度克隆幻灯片的底层函数（确保样式边框不丢） ---
+# --- 核心：深度克隆幻灯片的底层函数 ---
 def duplicate_slide(prs, source_slide):
-    # 使用 PPT 底层布局克隆一页新的幻灯片
     slide_layout = source_slide.slide_layout
     new_slide = prs.slides.add_slide(slide_layout)
-    
-    # 将原页面的所有元素（表格、文本框）复制到新页面
     for shape in source_slide.shapes:
         el = shape.element
         new_el = copy.deepcopy(el)
         new_slide.shapes._spTree.append(new_el)
-        
     return new_slide
 
 # --- 核心：多页 PPT 填空与生成发动机 ---
@@ -44,18 +40,14 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
         return None
         
     prs = Presentation(template_path)
-    # 模板自带的第一页作为我们的“源动力页面”
     source_slide = prs.slides[0]
     
-    # 遍历用户在手机上录入的所有问题列表
     for index, prob in enumerate(problem_list):
-        # 如果是第一条问题，直接用模板自带的第一页；如果是后续问题，克隆一页新 PPT
         if index == 0:
             current_slide = source_slide
         else:
             current_slide = duplicate_slide(prs, source_slide)
             
-        # 准备当前页面的填空数据
         data = {
             "{{title}}": project_title,
             "{{user}}": user,
@@ -67,7 +59,6 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
             "{{decision}}": prob["decision"]
         }
         
-        # 对当前页面进行文字替换
         for shape in current_slide.shapes:
             if shape.has_text_frame:
                 for key, val in data.items():
@@ -78,35 +69,33 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
                         for key, val in data.items():
                             safe_replace_text(cell.text_frame, key, val)
                             
-        # 📸 处理当前页面的照片
         if prob["img_bytes"] is not None:
-            # 临时存下该页面的照片
             temp_pic_path = f"temp_prob_{index}.jpg"
             with open(temp_pic_path, "wb") as f:
                 f.write(prob["img_bytes"])
-            # 精准贴到左侧
             current_slide.shapes.add_picture(temp_pic_path, Inches(0.52), Inches(2.3), width=Inches(2.95))
             
     output_path = "最终汇总巡场报告.pptx"
     prs.save(output_path)
     return output_path
 
-# --- 📱 终极多页手机网页界面 ---
+# --- 📱 现场巡场助理 (团队全员名单内置版) ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
-st.title("📱 现场巡场助理 (多页批量汇总版)")
+st.title("📱 现场巡场助理 (团队全员版)")
 
-# 使用 Streamlit 的 session_state 来在后台建立一个“临时问题暂存箱”
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
 
-# --- 1. 公共信息区域（整份 PPT 共享） ---
+# --- 1. 公共信息区域 ---
 st.subheader("🏢 第一步：填写项目公共信息")
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 
-user_options = ["樊洋洋", "刘璐", "其他人员"]
+# 🌟 核心优化：11位团队主力大将名单内置（默认首选樊洋洋）
+user_options = ["樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "刘璐", "吕山", "王凤国", "夏友强", "✍️ 手动输入..."]
 selected_user = st.selectbox("检查人", options=user_options, index=0)
-if selected_user == "其他人员":
-    user = st.text_input("请输入实际检查人姓名")
+
+if selected_user == "✍️ 手动输入...":
+    user = st.text_input("请输入实际检查人姓名", value="", placeholder="例：张三")
 else:
     user = selected_user
 
@@ -122,10 +111,12 @@ uploaded_file = st.file_uploader("📷 拍摄/上传当前问题照片", type=["
 desc = st.text_area("问题描述", value="", placeholder="请录入现场问题描述（支持手机语音转文字）...", key=f"desc_{len(st.session_state.problem_list)}")
 solve = st.text_area("解决措施", value="", placeholder="请录入整改要求与措施...", key=f"solve_{len(st.session_state.problem_list)}")
 
-duty_options = ["樊洋洋", "刘璐", "外部单位/其他人"]
+# 🌟 责任人同样共享这套全员名单（默认首选刘璐，方便你们配合）
+duty_options = ["刘璐", "樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "吕山", "王凤国", "夏友强", "✍️ 手动输入..."]
 selected_duty = st.selectbox("责任人", options=duty_options, index=0, key=f"duty_opt_{len(st.session_state.problem_list)}")
-if selected_duty == "外部单位/其他人":
-    duty = st.text_input("请输入实际责任人姓名", key=f"duty_name_{len(st.session_state.problem_list)}")
+
+if selected_duty == "✍️ 手动输入...":
+    duty = st.text_input("请输入实际责任人姓名", value="", placeholder="例：某某总包单位/王五", key=f"duty_name_{len(st.session_state.problem_list)}")
 else:
     duty = selected_duty
 
@@ -138,27 +129,28 @@ else:
 deadline_date = st.date_input("要求完成时间", key=f"deadline_{len(st.session_state.problem_list)}")
 deadline_str = deadline_date.strftime("%Y/%m/%d")
 
-# 🌟 核心：【暂存并添加下一个】按钮
+# 暂存按钮
 if st.button("➕ 确认并添加此条问题到列表"):
-    # 把当前填写的这一页数据打包存进列表
-    prob_data = {
-        "img_bytes": uploaded_file.getbuffer() if uploaded_file is not None else None,
-        "desc": desc,
-        "solve": solve,
-        "duty": duty,
-        "decision": decision_text,
-        "deadline": deadline_str
-    }
-    st.session_state.problem_list.append(prob_data)
-    st.success(f"🎉 成功！第 {len(st.session_state.problem_list)} 个问题已成功装箱！请继续在上方录入下一个问题。")
-    st.rerun() # 刷新网页清空当前框，方便录入下一条
+    if not duty or not user:
+        st.error("⚠️ 请确保检查人和责任人的姓名已填写完整！")
+    else:
+        prob_data = {
+            "img_bytes": uploaded_file.getbuffer() if uploaded_file is not None else None,
+            "desc": desc,
+            "solve": solve,
+            "duty": duty,
+            "decision": decision_text,
+            "deadline": deadline_str
+        }
+        st.session_state.problem_list.append(prob_data)
+        st.success(f"🎉 成功！第 {len(st.session_state.problem_list)} 个问题已成功装箱！")
+        st.rerun()
 
 st.divider()
 
 # --- 3. 汇总与清空区域 ---
 st.subheader("🚀 第三步：一键打包汇总并下载")
 
-# 展示当前已经添加的所有问题简述，让你心里有数
 if len(st.session_state.problem_list) > 0:
     st.write("📋 当前暂存箱内的问题列表：")
     for i, p in enumerate(st.session_state.problem_list):
@@ -180,7 +172,6 @@ if len(st.session_state.problem_list) > 0:
                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                         )
                         
-    # 允许一键清空重来
     if st.button("🗑️ 清空暂存箱（重新开始）", type="secondary"):
         st.session_state.problem_list = []
         st.success("暂存箱已清空。")
