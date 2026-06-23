@@ -3,6 +3,9 @@ import os
 import copy
 from pptx import Presentation
 from pptx.util import Inches, Pt
+from streamlit_drawable_canvas import st_canvas
+from PIL import Image
+import io
 
 # --- 核心：无损替换单个页面文字的函数 ---
 def safe_replace_text(text_frame, key, value):
@@ -79,9 +82,9 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
     prs.save(output_path)
     return output_path
 
-# --- 📱 现场巡场助理 (团队全员名单内置版) ---
+# --- 📱 现场巡场助理 (带照片手绘标注版) ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
-st.title("📱 现场巡场助理 (团队全员版)")
+st.title("📱 现场巡场助理 (照片标注版)")
 
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
@@ -90,52 +93,89 @@ if "problem_list" not in st.session_state:
 st.subheader("🏢 第一步：填写项目公共信息")
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 
-# 🌟 核心优化：11位团队主力大将名单内置（默认首选樊洋洋）
 user_options = ["樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "刘璐", "吕山", "王凤国", "夏友强", "✍️ 手动输入..."]
 selected_user = st.selectbox("检查人", options=user_options, index=0)
-
-if selected_user == "✍️ 手动输入...":
-    user = st.text_input("请输入实际检查人姓名", value="", placeholder="例：张三")
-else:
-    user = selected_user
+user = st.text_input("请输入实际检查人姓名", value="", placeholder="例：张三") if selected_user == "✍️ 手动输入..." else selected_user
 
 check_date = st.date_input("检查时间")
 date_str = check_date.strftime("%Y/%m/%d")
 
 st.divider()
 
-# --- 2. 问题录入区域（支持循环添加） ---
-st.subheader(f"📷 第二步：录入巡场问题 (当前已录入 {len(st.session_state.problem_list)} 个问题)")
+# --- 2. 问题录入与照片标注区域 ---
+st.subheader(f"📷 第二步：录入巡场问题并标注 (当前已录入 {len(st.session_state.problem_list)} 个)")
 
-uploaded_file = st.file_uploader("📷 拍摄/上传当前问题照片", type=["jpg", "jpeg", "png"], key=f"file_{len(st.session_state.problem_list)}")
+# 拍照上传
+bg_image_file = st.file_uploader("📷 第一步：拍摄/上传现场照片", type=["jpg", "jpeg", "png"], key=f"bg_file_{len(st.session_state.problem_list)}")
+
+marked_image_bytes = None
+
+if bg_image_file is not None:
+    st.write("🎨 **第二步：请在下方照片上滑动手指进行标注**")
+    
+    # 打开上传的图片并统一缩放到适合手机屏幕编辑的尺寸（宽度400）
+    bg_image = Image.open(bg_image_file)
+    w, h = bg_image.size
+    display_width = 400
+    display_height = int(h * (display_width / w))
+    bg_image_resized = bg_image.resize((display_width, display_height))
+    
+    # 标注工具栏选择
+    tool_mode = st.radio("选择标注工具：", ("画笔(自由画)", "矩形红框", "拉线/箭头", "橡皮擦"), index=0, horizontal=True)
+    
+    # 将选择的工具映射到画布组件上
+    drawing_mode = "freedraw"
+    if tool_mode == "矩形红框": drawing_mode = "rect"
+    elif tool_mode == "拉线/箭头": drawing_mode = "line"
+    elif tool_mode == "橡皮擦": drawing_mode = "transform"
+
+    # 唤起手机触屏画板
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 0, 0, 0)", # 透明填充，防止遮挡背景
+        stroke_width=3,
+        stroke_color="rgb(255, 0, 0)",  # 默认显眼的工程红
+        background_image=bg_image_resized,
+        update_streamlit=True,
+        height=display_height,
+        width=display_width,
+        drawing_mode=drawing_mode,
+        key=f"canvas_{len(st.session_state.problem_list)}"
+    )
+    
+    # 实时捕获画完后的图像数据
+    if canvas_result.image_data is not None:
+        # 将背景图和画板上的红色线条合体
+        canvas_img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
+        final_marked_img = Image.open(bg_image_file).convert("RGBA").resize((display_width, display_height))
+        final_marked_img = Image.alpha_composite(final_marked_img, canvas_img).convert("RGB")
+        
+        # 转化为字节流供 PPT 读取
+        img_byte_arr = io.BytesIO()
+        final_marked_img.save(img_byte_arr, format='JPEG')
+        marked_image_bytes = img_byte_arr.getvalue()
+        st.caption("✨ 标注已实时同步，可直接点击下方添加。")
+
+st.divider()
 desc = st.text_area("问题描述", value="", placeholder="请录入现场问题描述（支持手机语音转文字）...", key=f"desc_{len(st.session_state.problem_list)}")
 solve = st.text_area("解决措施", value="", placeholder="请录入整改要求与措施...", key=f"solve_{len(st.session_state.problem_list)}")
 
-# 🌟 责任人同样共享这套全员名单（默认首选刘璐，方便你们配合）
 duty_options = ["刘璐", "樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "吕山", "王凤国", "夏友强", "✍️ 手动输入..."]
 selected_duty = st.selectbox("责任人", options=duty_options, index=0, key=f"duty_opt_{len(st.session_state.problem_list)}")
-
-if selected_duty == "✍️ 手动输入...":
-    duty = st.text_input("请输入实际责任人姓名", value="", placeholder="例：某某总包单位/王五", key=f"duty_name_{len(st.session_state.problem_list)}")
-else:
-    duty = selected_duty
+duty = st.text_input("请输入实际责任人姓名", value="", placeholder="例：某某总包单位", key=f"duty_name_{len(st.session_state.problem_list)}") if selected_duty == "✍️ 手动输入..." else selected_duty
 
 decision_choice = st.radio("整改决定", options=["整改", "不整改"], index=0, horizontal=True, key=f"decision_{len(st.session_state.problem_list)}")
-if decision_choice == "整改":
-    decision_text = "整改  √ \n 不整改 ▢"
-else:
-    decision_text = "整改  ▢ \n 不整改 √"
+decision_text = "整改  √ \n 不整改 ▢" if decision_choice == "整改" else "整改  ▢ \n 不整改 √"
 
 deadline_date = st.date_input("要求完成时间", key=f"deadline_{len(st.session_state.problem_list)}")
 deadline_str = deadline_date.strftime("%Y/%m/%d")
 
-# 暂存按钮
+# 暂存并添加
 if st.button("➕ 确认并添加此条问题到列表"):
     if not duty or not user:
         st.error("⚠️ 请确保检查人和责任人的姓名已填写完整！")
     else:
         prob_data = {
-            "img_bytes": uploaded_file.getbuffer() if uploaded_file is not None else None,
+            "img_bytes": marked_image_bytes,  # 🌟 这里存入的是已经画好红色圈框的图片！
             "desc": desc,
             "solve": solve,
             "duty": duty,
@@ -143,12 +183,12 @@ if st.button("➕ 确认并添加此条问题到列表"):
             "deadline": deadline_str
         }
         st.session_state.problem_list.append(prob_data)
-        st.success(f"🎉 成功！第 {len(st.session_state.problem_list)} 个问题已成功装箱！")
+        st.success(f"🎉 成功！带标注的第 {len(st.session_state.problem_list)} 个问题已成功装箱！")
         st.rerun()
 
 st.divider()
 
-# --- 3. 汇总与清空区域 ---
+# --- 3. 汇总与下载区域 ---
 st.subheader("🚀 第三步：一键打包汇总并下载")
 
 if len(st.session_state.problem_list) > 0:
