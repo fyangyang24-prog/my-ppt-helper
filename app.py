@@ -6,6 +6,7 @@ from pptx.util import Inches, Pt
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
 import io
+import base64
 
 # --- 核心：无损替换单个页面文字的函数 ---
 def safe_replace_text(text_frame, key, value):
@@ -82,9 +83,9 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
     prs.save(output_path)
     return output_path
 
-# --- 📱 现场巡场助理 (带照片手绘标注版) ---
+# --- 📱 现场巡场助理 (极致修复稳定版) ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
-st.title("📱 现场巡场助理 (照片标注版)")
+st.title("📱 现场巡场助理 (完美画笔版)")
 
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
@@ -113,28 +114,32 @@ marked_image_bytes = None
 if bg_image_file is not None:
     st.write("🎨 **第二步：请在下方照片上滑动手指进行标注**")
     
-    # 打开上传的图片并统一缩放到适合手机屏幕编辑的尺寸（宽度400）
+    # 🌟 终极修复方案：转成 Base64 网页链接喂给画板，彻底解决底层崩溃
     bg_image = Image.open(bg_image_file)
     w, h = bg_image.size
     display_width = 400
     display_height = int(h * (display_width / w))
     bg_image_resized = bg_image.resize((display_width, display_height))
     
+    buffered = io.BytesIO()
+    bg_image_resized.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    b64_bg_url = f"data:image/png;base64,{img_str}"
+    
     # 标注工具栏选择
     tool_mode = st.radio("选择标注工具：", ("画笔(自由画)", "矩形红框", "拉线/箭头", "橡皮擦"), index=0, horizontal=True)
     
-    # 将选择的工具映射到画布组件上
     drawing_mode = "freedraw"
     if tool_mode == "矩形红框": drawing_mode = "rect"
     elif tool_mode == "拉线/箭头": drawing_mode = "line"
     elif tool_mode == "橡皮擦": drawing_mode = "transform"
 
-    # 唤起手机触屏画板
+    # 唤起手机触屏画板（使用 b64_bg_url 完美绕过兼容报错）
     canvas_result = st_canvas(
-        fill_color="rgba(255, 0, 0, 0)", # 透明填充，防止遮挡背景
+        fill_color="rgba(255, 0, 0, 0)", 
         stroke_width=3,
-        stroke_color="rgb(255, 0, 0)",  # 默认显眼的工程红
-        background_image=bg_image_resized,
+        stroke_color="rgb(255, 0, 0)",  
+        background_image=b64_bg_url, # 👈 注入安全通道
         update_streamlit=True,
         height=display_height,
         width=display_width,
@@ -142,14 +147,12 @@ if bg_image_file is not None:
         key=f"canvas_{len(st.session_state.problem_list)}"
     )
     
-    # 实时捕获画完后的图像数据
+    # 实时捕获画完后的图像数据并拼接
     if canvas_result.image_data is not None:
-        # 将背景图和画板上的红色线条合体
         canvas_img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
-        final_marked_img = Image.open(bg_image_file).convert("RGBA").resize((display_width, display_height))
+        final_marked_img = bg_image_resized.convert("RGBA")
         final_marked_img = Image.alpha_composite(final_marked_img, canvas_img).convert("RGB")
         
-        # 转化为字节流供 PPT 读取
         img_byte_arr = io.BytesIO()
         final_marked_img.save(img_byte_arr, format='JPEG')
         marked_image_bytes = img_byte_arr.getvalue()
@@ -174,8 +177,14 @@ if st.button("➕ 确认并添加此条问题到列表"):
     if not duty or not user:
         st.error("⚠️ 请确保检查人和责任人的姓名已填写完整！")
     else:
+        # 如果用户上传了图但没有做任何画笔点击，默认用缩放后的原图
+        if marked_image_bytes is None and bg_image_file is not None:
+            img_byte_arr = io.BytesIO()
+            bg_image_resized.convert("RGB").save(img_byte_arr, format='JPEG')
+            marked_image_bytes = img_byte_arr.getvalue()
+
         prob_data = {
-            "img_bytes": marked_image_bytes,  # 🌟 这里存入的是已经画好红色圈框的图片！
+            "img_bytes": marked_image_bytes,  
             "desc": desc,
             "solve": solve,
             "duty": duty,
