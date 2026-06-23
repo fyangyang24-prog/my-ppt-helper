@@ -3,7 +3,7 @@ import os
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
-# --- 核心逻辑：直接调用你刚刚跑通的无损填空代码 ---
+# --- 核心无损替换发动机 ---
 def safe_replace_text(text_frame, key, value):
     for paragraph in text_frame.paragraphs:
         if key in paragraph.text:
@@ -22,7 +22,7 @@ def safe_replace_text(text_frame, key, value):
                     if orig_font_color:
                         run.font.color.rgb = orig_font_color
 
-def build_ppt_from_web(uploaded_file, project_title, user, date, desc, solve, duty, deadline):
+def build_ppt_from_web(uploaded_file, project_title, user, date_str, desc, solve, duty, deadline_str, decision_text):
     template_path = "template.pptx"
     if not os.path.exists(template_path):
         return None
@@ -30,18 +30,18 @@ def build_ppt_from_web(uploaded_file, project_title, user, date, desc, solve, du
     prs = Presentation(template_path)
     slide = prs.slides[0]
 
-    # 将手机端输入的数据做成映射
+    # 映射表，把单选框组合好的符号文本塞给 {{decision}}
     data = {
         "{{title}}": project_title,
         "{{user}}": user,
-        "{{date}}": date,
+        "{{date}}": date_str,
         "{{desc}}": desc,
         "{{solve}}": solve,
         "{{duty}}": duty,
-        "{{deadline}}": deadline
+        "{{deadline}}": deadline_str,
+        "{{decision}}": decision_text  # 👈 新增：整改决定的打勾文本
     }
 
-    # 开始无损替换
     for shape in slide.shapes:
         if shape.has_text_frame:
             for key, val in data.items():
@@ -52,47 +52,77 @@ def build_ppt_from_web(uploaded_file, project_title, user, date, desc, solve, du
                     for key, val in data.items():
                         safe_replace_text(cell.text_frame, key, val)
 
-    # 📸 处理现场拍的照片
     if uploaded_file is not None:
-        # 将手机上传的照片临时存下来
         temp_path = "temp_mobile_pic.jpg"
         with open(temp_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
-        # 精准贴在左侧格子上
         slide.shapes.add_picture(temp_path, Inches(0.52), Inches(2.3), width=Inches(2.95))
 
     output_path = "手机生成的巡场报告.pptx"
     prs.save(output_path)
     return output_path
 
-# --- 📱 手机端网页界面设计 ---
+# --- 📱 终极完美版手机网页界面 ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
-st.title("📱 现场巡场助理 (手机版)")
-st.write("在现场拍完照，直接在此录入，一键生成和电脑端一样完美的 PPT。")
+st.title("📱 现场巡场助理 (终极完美版)")
 
 st.divider()
 
-# 1. 拍照/上传组件（手机上打开时直接唤起相机！）
+# 1. 照片拍照/上传
 uploaded_file = st.file_uploader("📷 点击拍照 / 上传问题照片", type=["jpg", "jpeg", "png"])
 
-# 2. 录入表单
+# 2. 基础信息填写
 project_title = st.text_input("项目名称", value="独立路壹号项目")
-user = st.text_input("检查人", value="刘璐")
-date = st.text_input("检查时间", value="2026/06/23")
-desc = st.text_area("问题描述", value="空间、布局、尺度：\n1、项目的各项配置标准应满足《住宅大盘区景观分档》 不满足")
-solve = st.text_area("解决措施", value="通过各个宅间增加价值树、软装弱化问题。")
-duty = st.text_input("责任人", value="刘璐")
-deadline = st.text_input("要求完成时间", value="2026/07/10")
+
+# 快捷选择检查人
+user_options = ["樊洋洋", "刘璐", "其他人员"]
+selected_user = st.selectbox("检查人", options=user_options, index=0)
+if selected_user == "其他人员":
+    user = st.text_input("请输入实际检查人姓名")
+else:
+    user = selected_user
+
+# 弹出日历选时间
+check_date = st.date_input("检查时间")
+date_str = check_date.strftime("%Y/%m/%d")
+
+st.divider()
+
+# 问题与措施（默认留空）
+desc = st.text_area("问题描述", value="", placeholder="请录入现场问题描述（支持手机语音转文字）...")
+solve = st.text_area("解决措施", value="", placeholder="请录入整改要求与措施...")
+
+st.divider()
+
+# 快捷选择责任人
+duty_options = ["樊洋洋", "刘璐", "外部单位/其他人"]
+selected_duty = st.selectbox("责任人", options=duty_options, index=0)
+if selected_duty == "外部单位/其他人":
+    duty = st.text_input("请输入实际责任人姓名")
+else:
+    duty = selected_duty
+
+# 🌟 新增优化点：整改决定单选框（手机端点击切换）
+decision_choice = st.radio("整改决定", options=["整改", "不整改"], index=0, horizontal=True)
+# 根据选择，自动拼装成带符号的文字输出给 PPT
+if decision_choice == "整改":
+    decision_text = "整改  √ \n 不整改 ▢"
+else:
+    decision_text = "整改  ▢ \n 不整改 √"
+
+# 弹出日历选完成时间
+deadline_date = st.date_input("要求完成时间")
+deadline_str = deadline_date.strftime("%Y/%m/%d")
 
 st.divider()
 
 # 3. 生成与下载
 if st.button("🚀 现场一键生成 PPT 报告"):
     if not os.path.exists("template.pptx"):
-        st.error("❌ 错误：请确保文件夹里有 template.pptx 模板文件！")
+        st.error("❌ 错误：请确保云端有名为 template.pptx 的模板文件！")
     else:
         with st.spinner("正在智能排版中..."):
-            out_file = build_ppt_from_web(uploaded_file, project_title, user, date, desc, solve, duty, deadline)
+            out_file = build_ppt_from_web(uploaded_file, project_title, user, date_str, desc, solve, duty, deadline_str, decision_text)
             if out_file:
                 st.success("🎉 PPT 生成成功！")
                 with open(out_file, "rb") as file:
