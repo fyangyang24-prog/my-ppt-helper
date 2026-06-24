@@ -79,7 +79,7 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
     prs.save(output_path)
     return output_path
 
-# --- 📱 现场巡场助理 (下拉自适应极简版) ---
+# --- 📱 现场巡场助理 (下拉自适应最终修复版) ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
 st.title("📱 现场巡场助理 (多页稳定版)")
 
@@ -94,10 +94,12 @@ st.subheader("🏢 第一步：填写项目公共信息")
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 
 selected_user = st.selectbox("检查人", options=team_members, index=0)
+# 强同步逻辑：如果选了手动输入，展示文本框
 if selected_user == "✍️ 手动输入...":
-    user = st.text_input("✍️ 请输入实际检查人姓名", value="", placeholder="例如：新同事名字")
+    user_input_val = st.text_input("✍️ 请输入实际检查人姓名", value="", placeholder="例如：新同事名字", key="user_manual_widget")
+    final_user = user_input_val
 else:
-    user = selected_user
+    final_user = selected_user
 
 check_date = st.date_input("检查时间")
 date_str = check_date.strftime("%Y/%m/%d")
@@ -112,12 +114,13 @@ uploaded_file = st.file_uploader("📷 拍摄/上传当前问题照片", type=["
 desc = st.text_area("问题描述", value="", placeholder="请录入现场问题描述（支持手机语音转文字）...", key=f"desc_{current_prob_idx}")
 solve = st.text_area("解决措施", value="", placeholder="请录入整改要求与措施...", key=f"solve_{current_prob_idx}")
 
-# 责任人下拉菜单，默认第 7 位（刘璐）
 selected_duty = st.selectbox("责任人", options=team_members, index=7, key=f"duty_select_{current_prob_idx}")
+# 强同步逻辑：如果是手动输入，展示责任人文本框
 if selected_duty == "✍️ 手动输入...":
-    duty = st.text_input("✍️ 请输入实际责任人/总包单位", value="", placeholder="例如：某某中建总包/李四", key=f"duty_input_{current_prob_idx}")
+    duty_input_val = st.text_input("✍️ 请输入实际责任人/总包单位", value="", placeholder="例如：某某中建总包/李四", key=f"duty_manual_widget_{current_prob_idx}")
+    final_duty = duty_input_val
 else:
-    duty = selected_duty
+    final_duty = selected_duty
 
 decision_choice = st.radio("整改决定", options=["整改", "不整改"], index=0, horizontal=True, key=f"decision_{current_prob_idx}")
 decision_text = "整改  √ \n 不整改 ▢" if decision_choice == "整改" else "整改  ▢ \n 不整改 √"
@@ -127,5 +130,57 @@ deadline_str = deadline_date.strftime("%Y/%m/%d")
 
 # 暂存按钮
 if st.button("➕ 确认并添加此条问题到列表"):
-    if not duty or not user:
-        st.error("⚠️ 请确保检查人和责任人的姓名已填写完整！")
+    # 再次兜底检查：确保去除两端空格
+    final_user = final_user.strip() if final_user else ""
+    final_duty = final_duty.strip() if final_duty else ""
+    
+    if not final_user:
+        st.error("⚠️ 检查人不能为空！如果选择了手动输入，请在弹出的文本框中填写名字。")
+    elif not final_duty:
+        st.error("⚠️ 责任人不能为空！如果选择了手动输入，请在弹出的文本框中填写名字或单位。")
+    else:
+        prob_data = {
+            "img_bytes": uploaded_file.getbuffer() if uploaded_file is not None else None,
+            "desc": desc,
+            "solve": solve,
+            "duty": final_duty,
+            "decision": decision_text,
+            "deadline": deadline_str
+        }
+        st.session_state.problem_list.append(prob_data)
+        st.success(f"🎉 成功！第 {len(st.session_state.problem_list)} 个问题已成功装箱！")
+        st.rerun()
+
+st.divider()
+
+# --- 3. 汇总与清空区域 ---
+st.subheader("🚀 第三步：一键打包汇总并下载")
+
+if len(st.session_state.problem_list) > 0:
+    st.write("📋 当前暂存箱内的问题列表：")
+    for i, p in enumerate(st.session_state.problem_list):
+        st.info(f"问题 {i+1}: {p['desc'][:20]}... (责任人: {p['duty']})")
+        
+    if st.button("🚀 一键打包生成完整多页 PPT 报告"):
+        if not os.path.exists("template.pptx"):
+            st.error("❌ 错误：请确保云端有名为 template.pptx 的模板文件！")
+        else:
+            with st.spinner("正在将所有问题进行多页批量排版中..."):
+                # 使用当前最新的公共检查人名字生成报告
+                out_file = build_multi_page_ppt(project_title, final_user, date_str, st.session_state.problem_list)
+                if out_file:
+                    st.success("🎉 完美！多页汇总 PPT 已成功合体！")
+                    with open(out_file, "rb") as file:
+                        st.download_button(
+                            label="📥 立即点击下载多页汇总 PPT 到手机",
+                            data=file,
+                            file_name=f"{project_title}-汇总巡场报告.pptx",
+                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                        )
+                        
+    if st.button("🗑️ 清空暂存箱（重新开始）", type="secondary"):
+        st.session_state.problem_list = []
+        st.success("暂存箱已清空。")
+        st.rerun()
+else:
+    st.warning("⚠️ 暂存箱目前是空的，请至少在上方添加一个问题后再生成 PPT。")
