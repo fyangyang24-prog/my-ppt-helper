@@ -5,7 +5,13 @@ import json
 import base64
 from pptx import Presentation
 from pptx.util import Inches, Pt
-from streamlit_javascript import st_javascript
+
+# --- 💡 安全引入持久化组件，防止未安装时崩溃 ---
+try:
+    from streamlit_javascript import st_javascript
+    JS_AVAILABLE = True
+except ImportError:
+    JS_AVAILABLE = False
 
 # --- 核心：无损替换单个页面文字的函数 ---
 def safe_replace_text(text_frame, key, value):
@@ -79,32 +85,32 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
                 with open(temp_pic_path, "wb") as f:
                     f.write(img_bytes)
                 current_slide.shapes.add_picture(temp_pic_path, Inches(0.52), Inches(2.3), width=Inches(2.95))
-            except Exception as e:
+            except Exception:
                 pass
             
     output_path = "最终汇总巡场报告.pptx"
     prs.save(output_path)
     return output_path
 
-# --- 📱 现场巡场助理 (防刷新断线自动暂存版) ---
+# --- 📱 现场巡场助理 (防刷新自适应最终版) ---
 st.set_page_config(page_title="设计师巡场助手", layout="centered")
-st.title("📱 现场巡场助理 (抗断线稳定版)")
-
-# --- 💾 本地持久化核心逻辑 ---
-# 尝试利用 JavaScript 从浏览器本地缓存中读取历史数据
-try:
-    local_data_json = st_javascript("localStorage.getItem('xuncha_backup');")
-    if local_data_json and local_data_json != "null" and "saved_problem_list" not in st.session_state:
-        backup = json.loads(local_data_json)
-        st.session_state.problem_list = backup.get("problem_list", [])
-        st.session_state.saved_project_title = backup.get("project_title", "独立路壹号项目")
-        st.session_state.saved_user = backup.get("user", "樊洋洋")
-        st.session_state.saved_problem_list = True
-except Exception as e:
-    pass
+st.title("📱 现场巡场助理 (自适应抗断线版)")
 
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
+
+# --- 💾 浏览器级别本地数据恢复机制 ---
+if JS_AVAILABLE and "saved_problem_list" not in st.session_state:
+    try:
+        local_data_json = st_javascript("localStorage.getItem('xuncha_backup_v2');")
+        if local_data_json and local_data_json != "null" and len(str(local_data_json)) > 10:
+            backup = json.loads(local_data_json)
+            st.session_state.problem_list = backup.get("problem_list", [])
+            st.session_state.saved_project_title = backup.get("project_title", "独立路壹号项目")
+            st.session_state.saved_user = backup.get("user", "樊洋洋")
+            st.session_state.saved_problem_list = True
+    except Exception:
+        pass
 
 # 固定备选人员名单
 team_members = ["樊洋洋", "付长春", "李新宇", "顾宇", "王硕", "郝思仆", "张晓莉", "刘璐", "吕山", "王凤国", "夏友强", "✍️ 手动输入..."]
@@ -160,7 +166,6 @@ if st.button("➕ 确认并添加此条问题到列表"):
     elif not final_duty:
         st.error("⚠️ 责任人不能为空！")
     else:
-        # 图片转换为 Base64 字符串以支持 JSON 本地持久化保存
         img_base64 = ""
         if uploaded_file is not None:
             img_base64 = base64.b64encode(uploaded_file.getbuffer()).decode("utf-8")
@@ -175,16 +180,20 @@ if st.button("➕ 确认并添加此条问题到列表"):
         }
         st.session_state.problem_list.append(prob_data)
         
-        # 🌟 核心：每次成功添加，立刻同步写入浏览器本地硬盘缓存，防止断网刷新丢失
-        backup_data = {
-            "project_title": project_title,
-            "user": final_user,
-            "problem_list": st.session_state.problem_list
-        }
-        js_save = f"localStorage.setItem('xuncha_backup', '{json.dumps(backup_data, ensure_ascii=False)}');"
-        st_javascript(js_save)
+        # 备份写入浏览器缓存
+        if JS_AVAILABLE:
+            try:
+                backup_data = {
+                    "project_title": project_title,
+                    "user": final_user,
+                    "problem_list": st.session_state.problem_list
+                }
+                js_save = f"localStorage.setItem('xuncha_backup_v2', '{json.dumps(backup_data, ensure_ascii=False)}');"
+                st_javascript(js_save)
+            except Exception:
+                pass
         
-        st.success(f"🎉 成功！第 {len(st.session_state.problem_list)} 个问题已成功装箱并自动本地备份！")
+        st.success(f"🎉 成功！第 {len(st.session_state.problem_list)} 个问题已成功装箱！")
         st.rerun()
 
 st.divider()
@@ -215,11 +224,14 @@ if len(st.session_state.problem_list) > 0:
                         
     if st.button("🗑️ 清空暂存箱（重新开始）", type="secondary"):
         st.session_state.problem_list = []
-        # 清空浏览器本地缓存
-        st_javascript("localStorage.removeItem('xuncha_backup');")
+        if JS_AVAILABLE:
+            try:
+                st_javascript("localStorage.removeItem('xuncha_backup_v2');")
+            except Exception:
+                pass
         if "saved_problem_list" in st.session_state:
             del st.session_state["saved_problem_list"]
-        st.success("暂存箱及本地备份已清空。")
+        st.success("暂存箱已清空。")
         st.rerun()
 else:
     st.warning("⚠️ 暂存箱目前是空的，请至少在上方添加一个问题后再生成 PPT。")
