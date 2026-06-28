@@ -6,7 +6,14 @@ import base64
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
-# --- 💡 新增：智能读取与匹配规定库 ---
+# --- 安全引入持久化组件 ---
+try:
+    from streamlit_javascript import st_javascript
+    JS_AVAILABLE = True
+except ImportError:
+    JS_AVAILABLE = False
+
+# --- 💡 新增：读取本地技术规定库的函数 ---
 def load_technical_rules():
     rules_file = "rules.txt"
     if not os.path.exists(rules_file):
@@ -14,39 +21,34 @@ def load_technical_rules():
     with open(rules_file, "r", encoding="utf-8") as f:
         return [line.strip() for line in f.readlines() if line.strip()]
 
-# --- 保持你现有的其他函数（如 build_multi_page_ppt 等不变） ---
-# (此处省略中间重复部分，直接整合核心逻辑)
+# --- 核心：无损替换单个页面文字的函数 ---
+def safe_replace_text(text_frame, key, value):
+    for paragraph in text_frame.paragraphs:
+        if key in paragraph.text:
+            for run in paragraph.runs:
+                if key in run.text:
+                    run.text = run.text.replace(key, value)
+            if key in paragraph.text:
+                orig_font_name = paragraph.runs[0].font.name if paragraph.runs else "Microsoft YaHei"
+                orig_font_size = paragraph.runs[0].font.size if paragraph.runs else Pt(14)
+                orig_font_color = paragraph.runs[0].font.color.rgb if paragraph.runs and paragraph.runs[0].font.color else None
+                paragraph.text = paragraph.text.replace(key, value)
+                for run in paragraph.runs:
+                    run.font.name = orig_font_name
+                    run.font.size = orig_font_size
+                    if orig_font_color:
+                        run.font.color.rgb = orig_font_color
 
-st.title("📱 智能巡场助手 (规定联动版)")
+# --- 核心：深度克隆幻灯片的底层函数 ---
+def duplicate_slide(prs, source_slide):
+    slide_layout = source_slide.slide_layout
+    new_slide = prs.slides.add_slide(slide_layout)
+    for shape in source_slide.shapes:
+        el = shape.element
+        new_el = copy.deepcopy(el)
+        new_slide.shapes._spTree.append(new_el)
+    return new_slide
 
-# 加载规则库
-all_rules = load_technical_rules()
-
-# --- 问题录入区域优化 ---
-st.subheader("📷 录入巡场问题")
-
-# 1. 🔍 关键词检索挂载
-search_kw = st.text_input("🔍 搜索技术规定关键词 (如：防水、坡道、高度)", placeholder="输入关键字后，下方自动匹配...")
-selected_rule = ""
-
-if search_kw:
-    matched = [r for r in all_rules if search_kw in r]
-    if matched:
-        chosen = st.selectbox("🎯 匹配到的规定 (点击选择自动填入下方):", matched)
-        selected_rule = f"【依据】：{chosen}\n【现场实际情况】："
-    else:
-        st.warning("未找到匹配规定，请手动录入。")
-
-# 2. 自动填入与自主完善
-# 注意：我们将 selected_rule 的值作为文本框的默认值，但仅在用户搜索时改变
-# 为了实现“选完后还能改”，我们使用 session_state 记录描述
-if "prob_desc" not in st.session_state:
-    st.session_state.prob_desc = ""
-
-if selected_rule:
-    st.session_state.prob_desc = selected_rule
-
-desc = st.text_area("问题描述（支持语音输入）", value=st.session_state.prob_desc, height=150)
-st.session_state.prob_desc = desc # 同步更新
-
-# ... (后续你的其余 PPT 生成逻辑不变)
+# --- 核心：多页 PPT 填空与生成发动机 ---
+def build_multi_page_ppt(project_title, user, date_str, problem_list):
+    template
