@@ -4,11 +4,11 @@ import base64
 from pptx import Presentation
 from pptx.util import Inches
 
-# --- 1. 确保 session_state 初始化，防止页面白屏 ---
+# --- 1. 确保 session_state 初始化 ---
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
 
-# --- 2. 安全文本替换函数 (兼容表格和文本框) ---
+# --- 2. 安全文本替换函数 ---
 def force_replace_text(shape, key, value):
     if hasattr(shape, "has_text_frame") and shape.has_text_frame:
         for paragraph in shape.text_frame.paragraphs:
@@ -22,31 +22,35 @@ def force_replace_text(shape, key, value):
                         if key in paragraph.text:
                             paragraph.text = paragraph.text.replace(key, str(value))
 
-# --- 3. 稳健的 PPT 生成引擎 ---
+# --- 3. 稳健的 PPT 生成引擎 (不再克隆形状，改为复制幻灯片) ---
 def build_multi_page_ppt(project_title, user, date_str, problem_list):
     template_path = "template.pptx"
     if not os.path.exists(template_path): return None
     
     prs = Presentation(template_path)
+    
+    # 获取模板的第一页作为“母版”
     source_slide = prs.slides[0]
     
     for index, prob in enumerate(problem_list):
+        # 复制幻灯片（比复制形状更稳健）
         if index == 0:
-            current_slide = source_slide
+            current_slide = prs.slides[0]
         else:
-            # 创建新页面，使用模板的第一页布局
+            # 复制第一页的内容到新的一页
             current_slide = prs.slides.add_slide(source_slide.slide_layout)
-            # 安全复制模板中的形状，跳过会导致 AttributeError 的复杂对象
             for shape in source_slide.shapes:
-                if hasattr(shape, "auto_shape_type"):
-                    try:
-                        new_shape = current_slide.shapes.add_shape(
-                            shape.auto_shape_type, shape.left, shape.top, shape.width, shape.height
-                        )
-                        if shape.has_text_frame: new_shape.text = shape.text
-                    except: continue
+                try:
+                    # 使用克隆逻辑：直接复制 element
+                    new_shape = current_slide.shapes.add_shape(
+                        shape.auto_shape_type, shape.left, shape.top, shape.width, shape.height
+                    )
+                    if shape.has_text_frame: new_shape.text = shape.text
+                except:
+                    # 某些无法简单克隆的（如图片），跳过
+                    continue
 
-        # 准备填充数据
+        # 填充数据
         data = {
             "{{title}}": project_title, "{{user}}": user, "{{date}}": date_str,
             "{{type}}": prob.get("type", "普通"), "{{desc}}": prob["desc"],
@@ -54,12 +58,11 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
             "{{deadline}}": prob["deadline"], "{{decision}}": prob["decision"]
         }
         
-        # 填充当前页所有形状
         for shape in current_slide.shapes:
             for key, val in data.items():
                 force_replace_text(shape, key, val)
         
-        # 插入图片
+        # 插入图片 (使用 try-except 包裹以防崩溃)
         if prob.get("img_base64"):
             try:
                 img_bytes = base64.b64decode(prob["img_base64"])
@@ -76,10 +79,7 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
 st.title("📱 现场巡场助理")
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 final_user = st.text_input("检查人", value="樊洋洋")
-
-# 修复后的日期输入 (注意：必须在同一行完成 .strftime，避免语法错误)
-check_date_obj = st.date_input("检查时间")
-check_date = check_date_obj.strftime("%Y/%m/%d")
+check_date = st.date_input("检查时间").strftime("%Y/%m/%d")
 
 prob_type = st.radio("问题分类", ["底线", "严控事项", "设计红黑条", "图纸错漏碰缺", "落地效果问题"], horizontal=True)
 uploaded_file = st.file_uploader("照片", type=["jpg", "png"])
@@ -98,6 +98,9 @@ if st.button("➕ 确认并添加"):
     st.rerun()
 
 if st.button("🚀 生成报告"):
-    out = build_multi_page_ppt(project_title, final_user, check_date, st.session_state.problem_list)
-    if out:
-        with open(out, "rb") as f: st.download_button("📥 下载 PPT", f, file_name="报告.pptx")
+    if not st.session_state.problem_list:
+        st.error("请先添加问题！")
+    else:
+        out = build_multi_page_ppt(project_title, final_user, check_date, st.session_state.problem_list)
+        if out:
+            with open(out, "rb") as f: st.download_button("📥 下载 PPT", f, file_name="报告.pptx")
