@@ -5,7 +5,7 @@ import base64
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
-# --- 核心：彻底强制替换文本 (支持复杂文本框) ---
+# --- 核心：安全文本替换 ---
 def force_replace_text(shape, key, value):
     if shape.has_text_frame:
         for paragraph in shape.text_frame.paragraphs:
@@ -18,21 +18,28 @@ def force_replace_text(shape, key, value):
                     if key in paragraph.text:
                         paragraph.text = paragraph.text.replace(key, str(value))
 
-# --- 核心：PPT 生成引擎 ---
+# --- 核心：PPT 生成引擎 (修复形状克隆报错) ---
 def build_multi_page_ppt(project_title, user, date_str, problem_list):
     if not os.path.exists("template.pptx"): return None
     prs = Presentation("template.pptx")
     source_slide = prs.slides[0]
     
     for index, prob in enumerate(problem_list):
-        # 如果不是第一页，克隆模板页
-        current_slide = source_slide if index == 0 else prs.slides.add_slide(source_slide.slide_layout)
-        if index != 0:
+        # 优化：直接使用 slide_layout 添加新幻灯片，规避形状深拷贝复杂性
+        if index == 0:
+            current_slide = source_slide
+        else:
+            current_slide = prs.slides.add_slide(source_slide.slide_layout)
+            # 仅复制基础形状，跳过复杂或不支持的形状
             for shape in source_slide.shapes:
-                new_shape = current_slide.shapes.add_shape(shape.auto_shape_type, shape.left, shape.top, shape.width, shape.height)
-                # (此处简化处理，若模板含复杂图表，建议直接复制 slide)
+                try:
+                    # 尝试复制形状
+                    new_shape = current_slide.shapes.add_shape(shape.auto_shape_type, shape.left, shape.top, shape.width, shape.height)
+                    if shape.has_text_frame:
+                        new_shape.text = shape.text
+                except:
+                    continue
         
-        # 定义每一页的独立数据
         data = {
             "{{title}}": project_title, "{{user}}": user, "{{date}}": date_str,
             "{{desc}}": prob["desc"], "{{solve}}": prob["solve"],
@@ -40,12 +47,10 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
             "{{decision}}": prob["decision"]
         }
         
-        # 执行强制替换
         for shape in current_slide.shapes:
             for key, val in data.items():
                 force_replace_text(shape, key, val)
         
-        # 插入图片
         if prob.get("img_base64"):
             try:
                 img_bytes = base64.b64decode(prob["img_base64"])
@@ -59,9 +64,12 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
 
 # --- 界面逻辑 ---
 st.set_page_config(page_title="巡场助手", layout="centered")
-st.title("📱 现场巡场助理")
 
-if "problem_list" not in st.session_state: st.session_state.problem_list = []
+# 修复 Attribute Error：确保 session_state 始终存在
+if "problem_list" not in st.session_state:
+    st.session_state.problem_list = []
+
+st.title("📱 现场巡场助理")
 
 # 输入区
 project_title = st.text_input("项目名称", value="独立路壹号项目")
