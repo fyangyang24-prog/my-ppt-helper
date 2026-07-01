@@ -2,16 +2,20 @@ import streamlit as st
 import os
 import base64
 from pptx import Presentation
-from pptx.util import Inches, Pt
+from pptx.util import Inches
 
-# --- 核心：安全且稳定的文本替换 ---
+# --- 1. 确保 session_state 初始化 ---
+if "problem_list" not in st.session_state:
+    st.session_state.problem_list = []
+
+# --- 2. 安全处理文本替换 ---
 def force_replace_text(shape, key, value):
-    # 检查文本框
+    # 检查普通文本框
     if hasattr(shape, "has_text_frame") and shape.has_text_frame:
         for paragraph in shape.text_frame.paragraphs:
             if key in paragraph.text:
                 paragraph.text = paragraph.text.replace(key, str(value))
-    # 检查表格
+    # 检查表格单元格
     elif hasattr(shape, "has_table") and shape.has_table:
         for row in shape.table.rows:
             for cell in row.cells:
@@ -20,33 +24,35 @@ def force_replace_text(shape, key, value):
                         if key in paragraph.text:
                             paragraph.text = paragraph.text.replace(key, str(value))
 
-# --- 核心：PPT 生成引擎 ---
+# --- 3. 修复后的 PPT 生成逻辑 ---
 def build_multi_page_ppt(project_title, user, date_str, problem_list):
     template_path = "template.pptx"
     if not os.path.exists(template_path): return None
     
     prs = Presentation(template_path)
-    # 使用 slide_layouts[0] 确保克隆出的页面布局与第一页一致
-    slide_layout = prs.slide_layouts[0]
+    source_slide = prs.slides[0]
     
     for index, prob in enumerate(problem_list):
         if index == 0:
-            current_slide = prs.slides[0]
+            current_slide = source_slide
         else:
-            current_slide = prs.slides.add_slide(slide_layout)
-            # 简化逻辑：仅将模板页的形状按原样放入新页面
-            for shape in prs.slides[0].shapes:
-                try:
-                    # 尝试复制形状（忽略复杂的特殊容器）
-                    if hasattr(shape, "auto_shape_type"):
-                        new_shape = current_slide.shapes.add_shape(shape.auto_shape_type, shape.left, shape.top, shape.width, shape.height)
+            # 创建新页面并复制模板布局
+            current_slide = prs.slides.add_slide(source_slide.slide_layout)
+            # 安全遍历模板形状
+            for shape in source_slide.shapes:
+                # 仅在对象具有形状类型时尝试添加
+                if hasattr(shape, "auto_shape_type"):
+                    try:
+                        new_shape = current_slide.shapes.add_shape(
+                            shape.auto_shape_type, shape.left, shape.top, shape.width, shape.height
+                        )
                         if shape.has_text_frame: new_shape.text = shape.text
-                except: continue
-        
+                    except: continue
+
         # 填充数据
         data = {
             "{{title}}": project_title, "{{user}}": user, "{{date}}": date_str,
-            "{{type}}": prob.get("type", "普通问题"), "{{desc}}": prob["desc"],
+            "{{type}}": prob.get("type", "普通"), "{{desc}}": prob["desc"],
             "{{solve}}": prob["solve"], "{{duty}}": prob["duty"],
             "{{deadline}}": prob["deadline"], "{{decision}}": prob["decision"]
         }
@@ -55,6 +61,7 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
             for key, val in data.items():
                 force_replace_text(shape, key, val)
         
+        # 插入图片
         if prob.get("img_base64"):
             try:
                 img_bytes = base64.b64decode(prob["img_base64"])
@@ -67,48 +74,8 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
     prs.save(output_path)
     return output_path
 
-# --- 界面逻辑 ---
-st.set_page_config(page_title="现场巡场助理", layout="centered")
-
-if "problem_list" not in st.session_state: st.session_state.problem_list = []
-
+# --- 4. 界面展示 ---
 st.title("📱 现场巡场助理")
-
-# 公共信息录入
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 final_user = st.text_input("检查人", value="樊洋洋")
-check_date = st.date_input("检查时间").strftime("%Y/%m/%d")
-
-st.divider()
-st.subheader(f"📷 录入巡场问题 (已暂存 {len(st.session_state.problem_list)} 条)")
-
-# 单选逻辑
-prob_type = st.radio("巡场问题分类", 
-                     options=["底线", "严控事项", "设计红黑条", "图纸错漏碰缺", "落地效果问题"], 
-                     horizontal=True)
-
-uploaded_file = st.file_uploader("拍摄现场照片", type=["jpg", "png"])
-desc = st.text_area("问题描述")
-solve = st.text_area("解决措施")
-final_duty = st.text_input("责任人")
-decision = st.radio("整改决定", ["整改", "不整改"], horizontal=True)
-deadline = st.date_input("完成时间").strftime("%Y/%m/%d")
-
-if st.button("➕ 确认并添加"):
-    if not desc or not final_duty:
-        st.error("请确保问题描述和责任人已填写！")
-    else:
-        img_b64 = base64.b64encode(uploaded_file.getbuffer()).decode("utf-8") if uploaded_file else ""
-        st.session_state.problem_list.append({
-            "type": prob_type, "img_base64": img_b64, "desc": desc, "solve": solve, 
-            "duty": final_duty, "decision": f"{decision} √", "deadline": deadline
-        })
-        st.rerun()
-
-if st.button("🚀 生成 PPT 汇总报告"):
-    if not st.session_state.problem_list:
-        st.error("暂无数据，请先添加问题！")
-    else:
-        out = build_multi_page_ppt(project_title, final_user, check_date, st.session_state.problem_list)
-        if out:
-            with open(out, "rb") as f: st.download_button("📥 点击下载汇总报告", f, file_name="巡场报告汇总.pptx")
+check_date = st.date_input("检查时间").strftime("%Y/%
