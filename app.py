@@ -4,21 +4,23 @@ import base64
 from pptx import Presentation
 from pptx.util import Inches
 
-# --- 1. 基础配置与初始化 ---
+# --- 1. 配置 ---
 st.set_page_config(page_title="现场巡场助理", layout="centered")
 
 if "problem_list" not in st.session_state:
     st.session_state.problem_list = []
 
-# --- 2. 文本替换核心函数 ---
+# --- 2. 核心：最稳健的文本替换 ---
 def replace_text_in_shape(shape, data):
-    """安全地替换形状内的文字，涵盖文本框和表格"""
+    """遍历形状及其所有表格单元格，进行文本替换"""
+    # 替换普通文本框
     if hasattr(shape, "has_text_frame") and shape.has_text_frame:
         for paragraph in shape.text_frame.paragraphs:
             for key, val in data.items():
                 if key in paragraph.text:
                     paragraph.text = paragraph.text.replace(key, str(val))
     
+    # 替换表格
     elif hasattr(shape, "has_table") and shape.has_table:
         for row in shape.table.rows:
             for cell in row.cells:
@@ -28,15 +30,16 @@ def replace_text_in_shape(shape, data):
                             if key in paragraph.text:
                                 paragraph.text = paragraph.text.replace(key, str(val))
 
-# --- 3. 稳健生成逻辑 ---
+# --- 3. PPT 生成 ---
 def build_ppt(project_title, user, date_str, problem_list):
     template_path = "template.pptx"
-    if not os.path.exists(template_path): 
-        st.error("未找到 template.pptx 模板文件")
+    if not os.path.exists(template_path):
+        st.error("未找到 template.pptx 文件！")
         return None
     
     prs = Presentation(template_path)
     
+    # 遍历问题并填入对应的页面
     for i, prob in enumerate(problem_list):
         if i < len(prs.slides):
             slide = prs.slides[i]
@@ -44,56 +47,59 @@ def build_ppt(project_title, user, date_str, problem_list):
                 "{{title}}": project_title,
                 "{{user}}": user,
                 "{{date}}": date_str,
-                "{{type}}": prob.get("type", ""),
+                "{{type}}": prob["type"],
                 "{{desc}}": prob["desc"],
                 "{{solve}}": prob["solve"],
                 "{{duty}}": prob["duty"],
                 "{{deadline}}": prob["deadline"],
                 "{{decision}}": prob["decision"]
             }
-            
+            # 替换该页所有内容
             for shape in slide.shapes:
                 replace_text_in_shape(shape, data)
             
+            # 添加图片
             if prob.get("img_base64"):
                 try:
                     img_bytes = base64.b64decode(prob["img_base64"])
                     temp_path = f"temp_{i}.jpg"
-                    with open(temp_path, "wb") as f: f.write(img_bytes)
+                    with open(temp_path, "wb") as f:
+                        f.write(img_bytes)
                     slide.shapes.add_picture(temp_path, Inches(0.52), Inches(2.3), width=Inches(2.95))
                 except Exception as e:
-                    st.warning(f"图片处理出错: {e}")
+                    st.warning(f"图片插入失败: {e}")
                     
     output_path = "巡场报告.pptx"
     prs.save(output_path)
     return output_path
 
-# --- 4. 界面展示 ---
+# --- 4. 界面 ---
 st.title("📱 现场巡场助理")
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 final_user = st.text_input("检查人", value="樊洋洋")
-check_date = st.date_input("检查时间").strftime("%Y/%m/%d")
+check_date = st.date_input("检查时间")
+# 格式化日期字符串
+check_date_str = check_date.strftime("%Y/%m/%d")
 
-# 【已修改】将选型改为填空，并添加括号备注
-prob_type = st.text_input(
-    "巡场问题分类", 
-    help="请输入问题类别",
-    placeholder="（如底线、严控事项、设计红黑条，图纸错漏碰缺、落地效果问题等）"
-)
-st.caption("备注：（如底线、严控事项、设计红黑条，图纸错漏碰缺、落地效果问题等）")
-
+prob_type = st.text_input("巡场问题分类", placeholder="（如底线、严控事项、设计红黑条，图纸错漏碰缺、落地效果问题等）")
 uploaded_file = st.file_uploader("拍摄现场照片", type=["jpg", "png"])
 desc = st.text_area("问题描述")
 solve = st.text_area("解决措施")
 final_duty = st.text_input("责任人")
 decision = st.radio("整改决定", ["整改", "不整改"], horizontal=True)
-deadline = st.date_input("完成时间").strftime("%Y/%m/%d")
+deadline = st.date_input("完成时间")
+deadline_str = deadline.strftime("%Y/%m/%d")
 
 if st.button("➕ 确认并添加"):
     img_b64 = base64.b64encode(uploaded_file.getbuffer()).decode("utf-8") if uploaded_file else ""
     st.session_state.problem_list.append({
-        "type": prob_type, "img_base64": img_b64, "desc": desc, "solve": solve, 
-        "duty": final_duty, "decision": f"{decision} √", "deadline": deadline
+        "type": prob_type, 
+        "img_base64": img_b64, 
+        "desc": desc, 
+        "solve": solve, 
+        "duty": final_duty, 
+        "decision": f"{decision} √", 
+        "deadline": deadline_str
     })
     st.success("添加成功！")
 
@@ -101,7 +107,7 @@ if st.button("🚀 生成报告"):
     if not st.session_state.problem_list:
         st.error("请先添加问题！")
     else:
-        out = build_ppt(project_title, final_user, check_date, st.session_state.problem_list)
+        out = build_ppt(project_title, final_user, check_date_str, st.session_state.problem_list)
         if out:
-            with open(out, "rb") as f: 
+            with open(out, "rb") as f:
                 st.download_button("📥 点击下载报告 PPT", f, file_name="巡场报告.pptx")
