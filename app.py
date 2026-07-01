@@ -12,12 +12,13 @@ if "problem_list" not in st.session_state:
 
 # --- 2. 核心替换逻辑 ---
 def replace_text_in_shape(shape, data):
-    """最稳健的文本替换，只替换文本，不改变形状结构"""
+    # 替换文本框
     if hasattr(shape, "has_text_frame") and shape.has_text_frame:
         for paragraph in shape.text_frame.paragraphs:
             for key, val in data.items():
                 if key in paragraph.text:
                     paragraph.text = paragraph.text.replace(key, str(val))
+    # 替换表格
     elif hasattr(shape, "has_table") and shape.has_table:
         for row in shape.table.rows:
             for cell in row.cells:
@@ -34,8 +35,7 @@ def build_ppt(project_title, user, date_str, problem_list):
     
     prs = Presentation(template_path)
     
-    # 直接在现有的 PPT 幻灯片里填数据
-    # 如果你有 N 个问题，确保 template.pptx 预先有 N 页
+    # 遍历问题并填入对应的幻灯片
     for i, prob in enumerate(problem_list):
         if i < len(prs.slides):
             slide = prs.slides[i]
@@ -45,10 +45,11 @@ def build_ppt(project_title, user, date_str, problem_list):
                 "{{solve}}": prob["solve"], "{{duty}}": prob["duty"],
                 "{{deadline}}": prob["deadline"], "{{decision}}": prob["decision"]
             }
+            # 填充文本
             for shape in slide.shapes:
                 replace_text_in_shape(shape, data)
             
-            # 尝试添加图片
+            # 添加图片
             if prob.get("img_base64"):
                 try:
                     img_bytes = base64.b64decode(prob["img_base64"])
@@ -67,12 +68,16 @@ project_title = st.text_input("项目名称", value="独立路壹号项目")
 final_user = st.text_input("检查人", value="樊洋洋")
 check_date = st.date_input("检查时间").strftime("%Y/%m/%d")
 
-prob_type = st.radio("问题分类", ["底线", "严控事项", "设计红黑条", "图纸错漏碰缺", "落地效果问题"], horizontal=True)
-uploaded_file = st.file_uploader("照片", type=["jpg", "png"])
+# 恢复单选逻辑
+prob_type = st.radio("巡场问题分类", 
+                     options=["底线", "严控事项", "设计红黑条", "图纸错漏碰缺", "落地效果问题"], 
+                     horizontal=True)
+
+uploaded_file = st.file_uploader("拍摄照片", type=["jpg", "png"])
 desc = st.text_area("问题描述")
 solve = st.text_area("解决措施")
 final_duty = st.text_input("责任人")
-decision = st.radio("整改", ["整改", "不整改"], horizontal=True)
+decision = st.radio("整改决定", ["整改", "不整改"], horizontal=True)
 deadline = st.date_input("完成时间").strftime("%Y/%m/%d")
 
 if st.button("➕ 确认并添加"):
@@ -84,6 +89,9 @@ if st.button("➕ 确认并添加"):
     st.rerun()
 
 if st.button("🚀 生成报告"):
-    out = build_ppt(project_title, final_user, check_date, st.session_state.problem_list)
-    if out:
-        with open(out, "rb") as f: st.download_button("📥 下载 PPT", f, file_name="巡场报告.pptx")
+    if not st.session_state.problem_list:
+        st.error("请先添加问题！")
+    else:
+        out = build_ppt(project_title, final_user, check_date, st.session_state.problem_list)
+        if out:
+            with open(out, "rb") as f: st.download_button("📥 下载 PPT", f, file_name="巡场报告.pptx")
