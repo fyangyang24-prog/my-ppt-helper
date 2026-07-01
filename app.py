@@ -4,15 +4,14 @@ import base64
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
-# --- 核心：安全文本替换 ---
+# --- 核心：安全且稳定的文本替换 ---
 def force_replace_text(shape, key, value):
-    # 检查是否为文本框
+    # 检查文本框
     if hasattr(shape, "has_text_frame") and shape.has_text_frame:
         for paragraph in shape.text_frame.paragraphs:
             if key in paragraph.text:
                 paragraph.text = paragraph.text.replace(key, str(value))
-    
-    # 检查是否为表格
+    # 检查表格
     elif hasattr(shape, "has_table") and shape.has_table:
         for row in shape.table.rows:
             for cell in row.cells:
@@ -27,16 +26,18 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
     if not os.path.exists(template_path): return None
     
     prs = Presentation(template_path)
-    source_slide = prs.slides[0]
+    # 使用 slide_layouts[0] 确保克隆出的页面布局与第一页一致
+    slide_layout = prs.slide_layouts[0]
     
     for index, prob in enumerate(problem_list):
         if index == 0:
-            current_slide = source_slide
+            current_slide = prs.slides[0]
         else:
-            current_slide = prs.slides.add_slide(source_slide.slide_layout)
-            # 安全复制形状
-            for shape in source_slide.shapes:
+            current_slide = prs.slides.add_slide(slide_layout)
+            # 简化逻辑：仅将模板页的形状按原样放入新页面
+            for shape in prs.slides[0].shapes:
                 try:
+                    # 尝试复制形状（忽略复杂的特殊容器）
                     if hasattr(shape, "auto_shape_type"):
                         new_shape = current_slide.shapes.add_shape(shape.auto_shape_type, shape.left, shape.top, shape.width, shape.height)
                         if shape.has_text_frame: new_shape.text = shape.text
@@ -50,12 +51,10 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
             "{{deadline}}": prob["deadline"], "{{decision}}": prob["decision"]
         }
         
-        # 遍历所有形状进行替换
         for shape in current_slide.shapes:
             for key, val in data.items():
                 force_replace_text(shape, key, val)
         
-        # 插入图片
         if prob.get("img_base64"):
             try:
                 img_bytes = base64.b64decode(prob["img_base64"])
@@ -71,25 +70,24 @@ def build_multi_page_ppt(project_title, user, date_str, problem_list):
 # --- 界面逻辑 ---
 st.set_page_config(page_title="现场巡场助理", layout="centered")
 
-if "problem_list" not in st.session_state:
-    st.session_state.problem_list = []
+if "problem_list" not in st.session_state: st.session_state.problem_list = []
 
 st.title("📱 现场巡场助理")
 
-# 公共信息
+# 公共信息录入
 project_title = st.text_input("项目名称", value="独立路壹号项目")
 final_user = st.text_input("检查人", value="樊洋洋")
 check_date = st.date_input("检查时间").strftime("%Y/%m/%d")
 
 st.divider()
-st.subheader(f"📷 录入问题 (已暂存 {len(st.session_state.problem_list)} 条)")
+st.subheader(f"📷 录入巡场问题 (已暂存 {len(st.session_state.problem_list)} 条)")
 
-# 问题分类单选
+# 单选逻辑
 prob_type = st.radio("巡场问题分类", 
                      options=["底线", "严控事项", "设计红黑条", "图纸错漏碰缺", "落地效果问题"], 
                      horizontal=True)
 
-uploaded_file = st.file_uploader("拍摄照片", type=["jpg", "png"])
+uploaded_file = st.file_uploader("拍摄现场照片", type=["jpg", "png"])
 desc = st.text_area("问题描述")
 solve = st.text_area("解决措施")
 final_duty = st.text_input("责任人")
@@ -98,7 +96,7 @@ deadline = st.date_input("完成时间").strftime("%Y/%m/%d")
 
 if st.button("➕ 确认并添加"):
     if not desc or not final_duty:
-        st.error("请完善信息！")
+        st.error("请确保问题描述和责任人已填写！")
     else:
         img_b64 = base64.b64encode(uploaded_file.getbuffer()).decode("utf-8") if uploaded_file else ""
         st.session_state.problem_list.append({
@@ -107,10 +105,10 @@ if st.button("➕ 确认并添加"):
         })
         st.rerun()
 
-if st.button("🚀 生成 PPT 报告"):
+if st.button("🚀 生成 PPT 汇总报告"):
     if not st.session_state.problem_list:
-        st.error("请先添加问题！")
+        st.error("暂无数据，请先添加问题！")
     else:
         out = build_multi_page_ppt(project_title, final_user, check_date, st.session_state.problem_list)
         if out:
-            with open(out, "rb") as f: st.download_button("📥 下载 PPT", f, file_name="最终报告.pptx")
+            with open(out, "rb") as f: st.download_button("📥 点击下载汇总报告", f, file_name="巡场报告汇总.pptx")
